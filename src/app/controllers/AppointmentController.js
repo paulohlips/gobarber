@@ -6,6 +6,8 @@ import User from "../models/User";
 import Appointment from "./../models/Appointment";
 import File from "../models/File";
 
+import Mail from "../../lib/Mail";
+
 import Notification from "../schemas/Notification";
 
 class AppointmentController {
@@ -17,7 +19,7 @@ class AppointmentController {
         canceled_at: null
       },
       order: ["date"],
-      attributes: ["id", "date"],
+      attributes: ["id", "date", "past", "cancelable"],
       limit: 20,
       offset: (page - 1) * 20,
       include: [
@@ -65,6 +67,12 @@ class AppointmentController {
       return res
         .status(401)
         .json({ error: "You can only create appointment with a provider" });
+    }
+
+    if (isProvider && provider_id == req.userId) {
+      return res
+        .status(401)
+        .json({ error: "You can't create appointment with you" });
     }
 
     /*
@@ -116,7 +124,20 @@ class AppointmentController {
     return res.json({ appointment });
   }
   async delete(req, res) {
-    const appointment = await Appointment.findByPk(req.params.id);
+    const appointment = await Appointment.findByPk(req.params.id, {
+      include: [
+        {
+          model: User,
+          as: "provider",
+          attributes: ["name", "email"]
+        },
+        {
+          model: User,
+          as: "user",
+          attributes: ["name"]
+        }
+      ]
+    });
 
     if (appointment.user_id !== req.userId) {
       return res.status(401).json({
@@ -135,6 +156,19 @@ class AppointmentController {
     appointment.canceled_at = new Date();
 
     await appointment.save();
+
+    await Mail.sendMail({
+      to: `${appointment.provider.name} <${appointment.provider.email}>`,
+      subject: "Agendamento cancelado",
+      template: "cancellation",
+      context: {
+        provider: appointment.provider.name,
+        user: appointment.user.name,
+        date: format(appointment.date, "dd 'de' MMMM', às' H:mm'h'", {
+          locale: pt
+        })
+      }
+    });
 
     return res.json({ appointment });
   }
